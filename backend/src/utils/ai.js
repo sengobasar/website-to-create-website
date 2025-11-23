@@ -21,25 +21,49 @@ Generate a full website with:
 - Complete layout structure
 - All section content
 - Tailwind CSS classes for styling
-- HTML or JSX template
+- Pure HTML template (NO JSX)
 
-Return ONLY the HTML/JSX code wrapped in a single div element. Do not include any explanations, markdown formatting, or additional text. Just the complete website code.`;
+CRITICAL: Always return clean HTML only. Never wrap it in markdown or code fences. Do NOT use \`\`\`html, \`\`\`jsx, or any markdown code blocks. Return ONLY the raw HTML code wrapped in a single div element. Do not include any explanations, markdown formatting, or additional text. Just the complete HTML code.`;
 
-  // Call Groq model - using llama-3.1-70b-versatile (replacement for decommissioned models)
+  // Call Groq model - try multiple supported models as fallback
   // Can be overridden with GROQ_MODEL environment variable
-  // Supported models: llama-3.1-8b-instant, llama-3.1-70b-versatile, mixtral-8x7b-32768
-  const model = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
+  // Supported models to try: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768
+  const preferredModel = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
   
-  // Force use of supported model (ignore any decommissioned models in env)
-  const supportedModel = 'llama-3.1-70b-versatile';
-  console.log(`Using Groq model: ${supportedModel}`);
+  // List of models to try (in order of preference)
+  const modelsToTry = [
+    preferredModel,
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768'
+  ].filter((model, index, self) => self.indexOf(model) === index); // Remove duplicates
   
-  const response = await groq.chat.completions.create({
-    model: supportedModel,
-    messages: [
-      { role: 'user', content: prompt }
-    ]
-  });
-
-  return response.choices[0].message.content;
+  let lastError = null;
+  
+  for (const model of modelsToTry) {
+    try {
+      console.log(`Attempting Groq model: ${model}`);
+      const response = await groq.chat.completions.create({
+        model: model,
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      });
+      
+      console.log(`Successfully using model: ${model}`);
+      return response.choices[0].message.content;
+    } catch (err) {
+      const errorMsg = err?.message || String(err) || '';
+      if (errorMsg.includes('model_decommissioned') || errorMsg.includes('model_not_found')) {
+        console.warn(`Model ${model} not available: ${errorMsg}. Trying next model...`);
+        lastError = err;
+        continue;
+      }
+      // For other errors, throw immediately
+      throw err;
+    }
+  }
+  
+  // If all models failed
+  throw new Error(`All models failed. Last error: ${lastError?.message || 'Unknown error'}. Please check Groq documentation for available models.`);
 }
